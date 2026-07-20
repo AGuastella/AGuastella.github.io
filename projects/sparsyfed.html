@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SparsyFed — Adriano Guastella</title>
+<meta name="description" content="SparsyFed — sparse adaptive federated training, published at ICLR 2025.">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-header">
+  <a class="home" href="/">Adriano Guastella</a>
+  <nav class="site-nav">
+    <a href="/#projects">Projects</a>
+    <a href="/#publications">Publications</a>
+    <a href="/#contact">Contact</a>
+  </nav>
+</header>
+
+<a class="back-link" href="/#projects">&larr; back to projects</a>
+
+<h1>SparsyFed</h1>
+<p class="tagline">Sparse Adaptive Federated Training</p>
+<div class="meta-line">
+  Co-first author (equal contribution with L. Sani) &middot; ICLR 2025, Singapore
+</div>
+<div class="tags">
+  <span class="tag">pytorch</span>
+  <span class="tag">federated</span>
+  <span class="tag">distributed</span>
+  <span class="tag">optimization</span>
+  <span class="tag">research</span>
+</div>
+
+<h2>Summary</h2>
+<p>
+  A federated sparse training method achieving 95% model sparsity with negligible
+  accuracy loss and 19&times; communication reduction vs. dense baselines, for
+  cross-device federated learning deployments.
+</p>
+
+<h2>Results</h2>
+<ul>
+  <li><strong>95% model sparsity</strong> with negligible accuracy loss</li>
+  <li><strong>19&times; communication reduction</strong> vs. dense models</li>
+  <li><strong>200&times; lower weight regrowth</strong> than previous methods</li>
+  <li><strong>Single hyperparameter</strong> simplicity</li>
+  <li><strong>Adaptive</strong> to heterogeneous data distributions (non-IID)</li>
+</ul>
+
+<h2>Why it matters</h2>
+<p>
+  Communication cost is the bottleneck in cross-device federated learning on
+  mobile and edge devices &mdash; a 19&times; reduction is a real deployment
+  unlock, not just a benchmark number. Sparsity also means smaller models, so
+  cheaper inference and storage on-device. And a single hyperparameter makes the
+  method easier to tune and operate in production, instead of adding another
+  knob to a system that already has too many.
+</p>
+
+<h2>Tech stack</h2>
+<p>PyTorch, Flower (federated learning framework), Python, Slurm, Weights &amp; Biases</p>
+
+<h2>Links</h2>
+<div class="links">
+  <a href="https://arxiv.org/abs/2504.05153">arXiv:2504.05153</a>
+  <a href="https://github.com/AGuastella/sparsyfed">GitHub repo</a>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Talia — Adriano Guastella</title>
+<meta name="description" content="Talia — a marketplace monitoring and price-tracking platform with LLM-based candidate scoring and a human-in-the-loop review UI.">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-header">
+  <a class="home" href="/">Adriano Guastella</a>
+  <nav class="site-nav">
+    <a href="/#projects">Projects</a>
+    <a href="/#publications">Publications</a>
+    <a href="/#contact">Contact</a>
+  </nav>
+</header>
+
+<a class="back-link" href="/#projects">&larr; back to projects</a>
+
+<h1>Talia</h1>
+<p class="tagline">Marketplace monitoring &amp; price-tracking, built for correctness and operability, not volume.</p>
+<div class="tags">
+  <span class="tag">python</span>
+  <span class="tag">postgresql</span>
+  <span class="tag">llm</span>
+  <span class="tag">systems</span>
+  <span class="tag">flask</span>
+</div>
+
+<h2>What it does</h2>
+<p>
+  Talia is a marketplace monitoring and price-tracking platform, currently pointed
+  at second-hand road bikes on Wallapop (Italian and Spanish markets). It runs
+  continuously on a dedicated always-on machine: discovering new listings through
+  the marketplace's search API, tracking every price and status change over time,
+  and scoring candidates against a versioned, buyer-specific rubric using
+  pluggable LLM backends &mdash; with a human-in-the-loop review UI producing
+  ground truth to evaluate those models against. It is deliberately personal-scale
+  and rate-limited: one user, one niche, built for correctness and operability
+  rather than volume.
+</p>
+<p>
+  The interesting parts are less "it scrapes a website" and more the engineering
+  around it: strict layering, an upsert-only PostgreSQL design with append-only
+  history, LLM structured output across three interchangeable backends with
+  schema validation and retry, and every non-obvious choice written down in a
+  design decision log.
+</p>
+
+<h2>Architecture</h2>
+<p>A systemd timer runs the discovery/re-check cycle every 30 minutes:</p>
+<pre>Discovery (search API) &rarr; Parse (pure functions) &rarr; PostgreSQL (upsert + history)
+   &rarr; keyword pre-filter &rarr; re-check loop (watching listings) &rarr; image download queue
+
+LLM assessment runs out-of-band, never inside the cycle:
+   Assessor interface &rarr; Anthropic API / Ollama / Gemini &rarr; jsonschema validation + retry-then-skip
+
+The database is also read by:
+   Flask review UI (screening + ground truth)
+   Read-only MCP server (agent access)</pre>
+
+<p>Four core modules, each with one narrow responsibility:</p>
+<table>
+  <tr><th>Module</th><th>Responsibility</th></tr>
+  <tr><td><code>fetch.py</code></td><td>HTTP only &mdash; Chrome TLS impersonation; raises typed errors, callers decide what a 404 means</td></tr>
+  <tr><td><code>parse.py</code></td><td>Pure functions &mdash; HTML/JSON in, plain dicts out; no HTTP, no database</td></tr>
+  <tr><td><code>db.py</code></td><td>All persistence &mdash; upserts with <code>ON CONFLICT</code>, explicit transactions, single write-path functions</td></tr>
+  <tr><td><code>main.py</code></td><td>Orchestration only &mdash; the discovery/re-check cycle, subcommands for timers vs. dev loop</td></tr>
+</table>
+<p>
+  The seams are real, not aspirational: parsing is testable against saved
+  fixtures with no network, the database layer is testable against a scratch
+  schema with no scraping, and neither knows the other exists.
+</p>
+
+<h2>Data model</h2>
+<p>PostgreSQL + pgvector. The design choices that matter:</p>
+<ul>
+  <li><strong>Upsert-only write paths.</strong> Every write is <code>INSERT ... ON CONFLICT</code>, never SELECT-then-INSERT. Listings are never deleted; an <code>interest</code> enum (<code>unscreened</code> / <code>watching</code> / <code>ignored</code>) gates which ones the re-check loop spends budget on.</li>
+  <li><strong>Append-only history.</strong> <code>price_history</code> and <code>status_history</code> get one row per observed change, not per scrape &mdash; the tables answer "when did this drop to &euro;90?" directly.</li>
+  <li><strong>Platform-agnostic without DDL migrations.</strong> A <code>platform</code> column, JSONB attributes, and <code>product_types</code> / <code>rubrics</code> tables mean a second marketplace or product category is new rows, not new columns. The code deliberately does not abstract over platforms yet &mdash; abstracting from a single example guesses the wrong shape.</li>
+  <li><strong>One write path per table.</strong> <code>save_score()</code>, <code>save_extraction()</code>, <code>save_embedding()</code>, <code>save_ground_truth()</code> are the only functions that write their tables, whoever the caller is. Tables storing human annotations are <code>ON DELETE RESTRICT</code>, so no cleanup job can silently eat manual work.</li>
+  <li><strong>Work queues as queries, not tables.</strong> Pending image downloads are <code>WHERE downloaded_at IS NULL</code>; the extraction backlog is "watching, and no extraction under the current rubric." Crashed runs resume for free.</li>
+</ul>
+
+<h2>LLM assessment</h2>
+<p>
+  Scoring and attribute extraction run against rubrics stored as data in the
+  database &mdash; versioned prompt + JSON schema per rubric &mdash; not hardcoded
+  prompts. A small <code>Assessor</code> interface has three interchangeable
+  backends, selected by env var: <strong>Anthropic API</strong> (structured output
+  via forced tool-use), <strong>Ollama</strong> (local vision models, structured
+  via the JSON-schema <code>format</code> parameter), and <strong>Gemini</strong>
+  (plain REST, with a deliberately lossy schema-dialect conversion). All three
+  funnel through one <code>jsonschema</code> validator with a
+  retry-with-errors-then-skip loop &mdash; an invalid result can never reach the
+  database, by construction. Every score carries <code>model_id</code> provenance
+  so hosted and local model results coexist in the same table.
+</p>
+<p>Two honest caveats, by design:</p>
+<ul>
+  <li>The pipeline never calls an LLM automatically. Assessment is a separate, budgeted command on its own nightly timer &mdash; per-listing API calls across dozens of daily candidates add up, and model quality is being measured before being trusted.</li>
+  <li>Quality is measured against ground truth, not vibes. A local 3B model once confabulated a "seized seatpost" defect straight out of the rubric's own example text &mdash; schema-valid, factually wrong. That's exactly why the review UI collects human scores before any backend shootout is run.</li>
+</ul>
+
+<h2>Human in the loop</h2>
+<p>
+  A server-rendered Flask review UI for browsing listings e-shop style: one-tap
+  interest screening, price-drop highlighting, and a ground-truth annotation form
+  (score, defects with severity, even a click-to-measure overlay that estimates
+  frame size from photos using the wheel as a scale reference &mdash; human
+  clicks, not a vision model, because VLM keypoints aren't reliable at the
+  tolerance that matters). Model evaluations are collapsed by default on the
+  annotation page to limit anchoring.
+</p>
+
+<h2>Agent access</h2>
+<p>
+  A read-only MCP server exposes three tools (search listings, listing history,
+  assessment detail) so a coding agent can query the database directly. Read-only
+  is enforced at the connection (<code>default_transaction_read_only = on</code>),
+  not promised in a comment.
+</p>
+
+<h2>Operations</h2>
+<ul>
+  <li><strong>Deployment target</strong>: an old laptop running bare Linux 24/7. Docker Compose runs Postgres and the review UI continuously; systemd timers fire one-shot containers &mdash; the discovery cycle every 30 minutes, the extraction drain nightly.</li>
+  <li><strong>Migration runbook</strong>: dev machine &rarr; laptop via dump/restore, rehearsed with a dry run against the real data, with the dev database kept as the rollback.</li>
+  <li><strong>Tests</strong> (ruff + pytest): thin but honest &mdash; they pin decisions, not just behavior. The schema test asserts that deleting an annotated listing is blocked; an exact-string guard on the embedding summary format fails loudly if anyone forks the embedding space.</li>
+  <li><strong>Decision records</strong>: the why behind everything non-obvious, including the bugs that shaped the code &mdash; e.g. psycopg3's implicit-transaction behavior silently swallowing a whole cycle of writes, and Wallapop's auto-translation silently dropping defect language from a description.</li>
+</ul>
+
+</div>
+</body>
+</html>
