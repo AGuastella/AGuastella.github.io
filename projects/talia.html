@@ -13,9 +13,10 @@
 <header class="site-header">
   <a class="home" href="/">Adriano Guastella</a>
   <nav class="site-nav">
+    <a href="/#experience">Experience</a>
     <a href="/#projects">Projects</a>
     <a href="/#publications">Publications</a>
-    <a href="/#contact">Contact</a>
+    <a href="/cv.pdf">CV (PDF)</a>
   </nav>
 </header>
 
@@ -30,6 +31,12 @@
   <span class="tag">systems</span>
   <span class="tag">flask</span>
 </div>
+
+<p class="meta-line">
+  <strong>TL;DR:</strong> upsert-only Postgres with append-only price/status history,
+  three interchangeable LLM backends validated through one schema gate, and a
+  review UI that produces ground truth before any model is trusted.
+</p>
 
 <h2>What it does</h2>
 <p>
@@ -133,6 +140,10 @@ The database is also read by:
   <li><strong>Tests</strong> (ruff + pytest): thin but honest &mdash; they pin decisions, not just behavior. The schema test asserts that deleting an annotated listing is blocked; an exact-string guard on the embedding summary format fails loudly if anyone forks the embedding space.</li>
   <li><strong>Decision records</strong>: the why behind everything non-obvious, including the bugs that shaped the code &mdash; e.g. psycopg3's implicit-transaction behavior silently swallowing a whole cycle of writes, and Wallapop's auto-translation silently dropping defect language from a description.</li>
 </ul>
+
+<footer>
+  <a href="/">Adriano Guastella</a> &middot; <a href="/cv.pdf">CV (PDF)</a>
+</footer>
 
 </div>
 </body>
