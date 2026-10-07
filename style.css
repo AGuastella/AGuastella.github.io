@@ -132,6 +132,8 @@ a { color: var(--accent); }
 
 .card h3 { color: var(--text); }
 
+.card .ext { color: var(--text-muted); font-weight: 400; }
+
 .card .desc {
   color: var(--text-muted);
   font-size: 0.96rem;
