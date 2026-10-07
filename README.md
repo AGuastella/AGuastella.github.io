@@ -11,6 +11,7 @@ index.html          home: about, projects, publications
 projects/
   talia.html         project writeup
   sparsyfed.html      project writeup
+  homelab.html        project writeup (sonic home server)
 style.css            shared stylesheet (light/dark via prefers-color-scheme)
 404.html             custom not-found page (served by GitHub Pages)
 favicon.svg          site icon

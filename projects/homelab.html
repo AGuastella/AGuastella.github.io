@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sonic — Adriano Guastella</title>
+<meta name="description" content="sonic — a 2015 laptop run as a 24/7 headless home server: media, music and project services on Docker, with every fix root-caused, scripted and verified across reboots.">
+<link rel="canonical" href="https://aguastella.github.io/projects/homelab.html">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Adriano Guastella">
+<meta property="og:title" content="sonic — Adriano Guastella">
+<meta property="og:description" content="sonic — a 2015 laptop run as a 24/7 headless home server: media, music and project services on Docker, with every fix root-caused, scripted and verified across reboots.">
+<meta property="og:url" content="https://aguastella.github.io/projects/homelab.html">
+<meta property="og:image" content="https://aguastella.github.io/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-header">
+  <a class="home" href="/">Adriano Guastella</a>
+  <nav class="site-nav">
+    <a href="/#experience">Experience</a>
+    <a href="/#projects">Projects</a>
+    <a href="/#publications">Publications</a>
+    <a href="/cv.pdf">CV (PDF)</a>
+  </nav>
+</header>
+
+<a class="back-link" href="/#projects">&larr; back to projects</a>
+
+<h1>sonic</h1>
+<p class="tagline">A 2015 laptop running 24/7 as a headless home server &mdash; operated like production, debugged from first principles.</p>
+<div class="tags">
+  <span class="tag">linux</span>
+  <span class="tag">systemd</span>
+  <span class="tag">docker</span>
+  <span class="tag">debugging</span>
+  <span class="tag">ops</span>
+</div>
+
+<p class="meta-line">
+  <strong>TL;DR:</strong> an old ASUS laptop with no out-of-band management,
+  so every failure has to be prevented, detected, or recoverable remotely.
+  Each problem below was root-caused, fixed with a script that backs up,
+  verifies and prints its own rollback, and then confirmed across a real reboot.
+</p>
+
+<h2>The machine</h2>
+<p>
+  An ASUS X555LJ (i7-5500U, 8 GB RAM) on Debian 13, lid closed, no battery,
+  powering on by itself when AC returns. System and service state live on a
+  500 GB SATA SSD; media lives on a 500 GB 5400 RPM laptop HDD. It runs, in
+  Docker: Jellyfin (films and TV, with hardware transcoding), Navidrome (music),
+  FileBrowser, and the database and review UI for
+  <a href="talia.html">Talia</a>, whose jobs fire from systemd timers. Remote
+  access is SSH over Tailscale, with tmux sessions that survive dropped links and
+  handing off between phone and laptop.
+</p>
+
+<h2>Debugging stories</h2>
+
+<h3>USB 3.0 stuck at USB 2.0 speed &mdash; a silicon bug, and a kernel trap</h3>
+<p>
+  Every USB 3 drive trained SuperSpeed, enumerated cleanly at 5000 Mbps, then
+  failed every SCSI command with <code>DID_NO_CONNECT</code> and silently
+  re-attached on the USB 2.0 half at 480 Mbps (~40 MB/s). The transient
+  connect/disconnect pair only shows in <code>journalctl -k</code>; after the
+  fallback, sysfs makes it look like SuperSpeed never worked at all. Cause: the
+  <code>uas</code> driver uses bulk streams on SuperSpeed links, and this Intel
+  xHCI advertises 256 streams in a read-only capability register that don't
+  actually work &mdash; so no BIOS update can fix it.
+</p>
+<p>
+  The usual advice, <code>blacklist uas</code>, made it worse: the device then
+  enumerated perfectly and got <em>no driver at all</em>, with nothing logged.
+  Reading <code>usb-storage</code>'s <code>storage_probe()</code> explained why:
+  it hands UAS-capable devices to <code>uas</code> whenever
+  <code>CONFIG_USB_UAS</code> is enabled, without checking that the module is
+  loaded. The working fix is the per-device <code>US_FL_IGNORE_UAS</code> quirk
+  (<code>quirks=VID:PID:u</code>, baked into the initramfs), which keeps the
+  device on bulk-only transport at full link speed: <strong>~40 &rarr; ~320 MB/s</strong>,
+  about 70% of the 5 Gbps theoretical ceiling &mdash; the practical limit for
+  a protocol without command queuing.
+</p>
+<p>
+  One port still stuck at 480 Mbps after the fix. Over three rounds it looked
+  like a USB 2.0-only port, a bad cable, and a cracked solder joint. It was dust
+  on the SuperSpeed contacts, which sit behind the USB 2.0 pins &mdash; so the
+  port still worked perfectly, just slowly. Lesson kept: <em>480 where you expect
+  5000 &rarr; clean the socket before suspecting anything else.</em>
+</p>
+
+<h3>Containers started before their disk was mounted</h3>
+<p>
+  After a reboot, media services showed "file not found" errors. The media disk
+  is mounted with <code>nofail</code> (so a dead disk can't block boot), which
+  also means nothing orders Docker after it: Docker came up at 13.5 s, the disk
+  at 17.3 s, and containers had bind-mounted the empty directory
+  <em>underneath</em> the mountpoint, on the SSD. Confirmed per process via
+  <code>/proc/&lt;pid&gt;/mountinfo</code> device numbers. Fix: a
+  <code>RequiresMountsFor=</code> drop-in on <code>docker.service</code>;
+  verified on the next boot (disk at 7.0 s, Docker at 12.8 s, every container on
+  the right device).
+</p>
+
+<h3>4K playback freezing with an idle CPU</h3>
+<p>
+  The browser client can't play multichannel audio, so Jellyfin re-encoded only
+  the audio &mdash; which still means rewriting the whole film as HLS segments.
+  Those segments went to the same 5400 RPM disk the film was read from, and the
+  head seeking between the two dropped throughput below the stream's bitrate.
+  Measured: 4.5&times; more cumulative write latency than read latency on that
+  disk, and an 18 GB segment cache that vanished when the player closed. Moving
+  the transcode cache to the SSD and enabling throttling (which turned out to be
+  <code>ffmpeg -readrate 10</code>, not pause/resume) took media-disk reads from
+  78 to 31 MB/s with zero writes, and playback smoothed out.
+</p>
+
+<h3>Fan control with a tachometer that goes dark</h3>
+<p>
+  The laptop's EC stops reporting fan RPM (<code>ENXIO</code>) the moment PWM is
+  switched to manual, so <code>pwmconfig</code>-style calibration is impossible
+  and <code>fancontrol</code>'s stall detection crashes the daemon. Calibrated
+  start/stop thresholds by ear instead, and added a systemd safety net:
+  <code>Restart=always</code> plus an <code>ExecStopPost</code> that hands the
+  fan back to firmware control whenever the daemon isn't running &mdash; tested
+  live during a real crash loop. Later, a threshold sitting inside the idle
+  temperature band made the fan hunt on/off (fancontrol has no hysteresis);
+  moving it clear of the band cut idle fan activity from 64% to 7% of samples
+  over an hour of logging, while peaks under load stayed below the full-speed
+  point.
+</p>
+
+<h3>Smaller ones</h3>
+<ul>
+  <li><strong>Head parking:</strong> the media HDD shipped with APM at its most aggressive setting and was parking its heads ~42 times an hour &mdash; on track to pass its rated load cycles within a year. APM 254, persisted via <code>hdparm.conf</code>: zero parks in the hours after, setting confirmed across a reboot.</li>
+  <li><strong>"DNS unavailable" that wasn't an outage:</strong> the ISP hands out DNS servers inside 100.64.0.0/10, the CGNAT range Tailscale claims and firewalls on other interfaces, so their replies were dropped. Containers started in the few seconds before Tailscale rewrote <code>resolv.conf</code> kept the dead resolvers; Docker now gets fixed upstream DNS.</li>
+  <li><strong>Scheduled tasks drifting into the day:</strong> Jellyfin's interval-based maintenance tasks anchor to server start time, so after a reboot a CPU-heavy audio analysis ran mid-afternoon. Pinned to fixed night-time triggers.</li>
+</ul>
+
+<h2>Operations</h2>
+<ul>
+  <li><strong>Three update lanes.</strong> There is no remote console, so anything that can cost access is never automatic. Security patches install unattended (no auto-reboot; kernel, Docker and Tailscale excluded); everything else is monthly, at the keyboard, followed by a post-reboot check script; container images are pulled separately and deliberately. Gotcha found on the first dry run: APT config lists <em>append</em>, so Debian's default origins silently widened the "security-only" policy from 8 packages to 57 until cleared with <code>#clear</code>.</li>
+  <li><strong>Alerting.</strong> Push notifications via ntfy on separate topics for the machine and for each service, so one can be muted without losing the other: a notice on every boot (which is how a power cut shows up), a 6-hourly check for full disks, Docker down, or failed units, and an <code>OnFailure=</code> template any new unit can opt into in one line. Tested against faked states before going live.</li>
+  <li><strong>Post-reboot check.</strong> One script verifies everything a reboot can silently undo: kernel booted vs installed, the USB quirk in the initramfs, fan daemon and sensor numbering, disk mounted, containers healthy, Tailscale key expiry.</li>
+  <li><strong>Change discipline.</strong> Every fix is a script that is dry-run by default or idempotent, takes a timestamped backup, verifies its own result, and prints its rollback. Root causes and the traps hit along the way are written down next to the scripts.</li>
+</ul>
+
+<footer>
+  <a href="/">Adriano Guastella</a> &middot; <a href="/cv.pdf">CV (PDF)</a>
+</footer>
+
+</div>
+</body>
+</html>
