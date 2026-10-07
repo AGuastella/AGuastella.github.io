@@ -52,7 +52,7 @@
 
 <h2>The machine</h2>
 <p>
-  An ASUS X555LJ (i7-5500U, 8 GB RAM) on Debian 13, lid closed, no battery,
+  An ASUS X555LJ on Debian 13, lid closed, no battery,
   powering on by itself when AC returns. System and service state live on a
   500 GB SATA SSD; media lives on a 500 GB 5400 RPM laptop HDD. It runs, in
   Docker: Jellyfin (films and TV, with hardware transcoding), Navidrome (music),
@@ -145,7 +145,7 @@
 
 <h2>Operations</h2>
 <ul>
-  <li><strong>Three update lanes.</strong> There is no remote console, so anything that can cost access is never automatic. Security patches install unattended (no auto-reboot; kernel, Docker and Tailscale excluded); everything else is monthly, at the keyboard, followed by a post-reboot check script; container images are pulled separately and deliberately. Gotcha found on the first dry run: APT config lists <em>append</em>, so Debian's default origins silently widened the "security-only" policy from 8 packages to 57 until cleared with <code>#clear</code>.</li>
+  <li><strong>Three update lanes.</strong> There is no remote console, so anything that can cost access is never automatic. Security patches install unattended (no auto-reboot, and nothing that changes the boot path or remote access); everything else is monthly, at the keyboard, followed by a post-reboot check script; container images are pulled separately and deliberately. Gotcha found on the first dry run: APT config lists <em>append</em>, so Debian's default origins silently widened the "security-only" policy from 8 packages to 57 until cleared with <code>#clear</code>.</li>
   <li><strong>Alerting.</strong> Push notifications via ntfy on separate topics for the machine and for each service, so one can be muted without losing the other: a notice on every boot (which is how a power cut shows up), a 6-hourly check for full disks, Docker down, or failed units, and an <code>OnFailure=</code> template any new unit can opt into in one line. Tested against faked states before going live.</li>
   <li><strong>Post-reboot check.</strong> One script verifies everything a reboot can silently undo: kernel booted vs installed, the USB quirk in the initramfs, fan daemon and sensor numbering, disk mounted, containers healthy, Tailscale key expiry.</li>
   <li><strong>Change discipline.</strong> Every fix is a script that is dry-run by default or idempotent, takes a timestamped backup, verifies its own result, and prints its rollback. Root causes and the traps hit along the way are written down next to the scripts.</li>
