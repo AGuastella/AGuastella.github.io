@@ -9,6 +9,7 @@
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --max-width: 760px;
+  color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -58,10 +59,15 @@ header.site-header a.home {
   text-decoration: none;
 }
 
+nav.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
 nav.site-nav a {
   color: var(--text-muted);
   text-decoration: none;
-  margin-left: 1.25rem;
   font-size: 0.95rem;
 }
 
